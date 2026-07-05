@@ -12,7 +12,7 @@ const EMAIL_CONFIG = {
 };
 
 const MAX_POEMS = 3;          // 시집 최대 3개
-const STORAGE_KEY = 'poems';
+const STORAGE_KEY = 'poems_beta';   // 본판과 저장소 분리
 
 /* ----- 임시 디버그: 오류가 나면 화면 하단에 표시 (원인 파악용) ----- */
 function showFatal(msg) {
