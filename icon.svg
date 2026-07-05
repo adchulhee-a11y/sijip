@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#f6efdd"/>
+  <rect x="106" y="106" width="300" height="300" rx="48" fill="#9c3524"
+        transform="rotate(-3 256 256)"/>
+  <rect x="120" y="120" width="272" height="272" rx="36" fill="none"
+        stroke="#f8f1e2" stroke-width="10" opacity="0.45"
+        transform="rotate(-3 256 256)"/>
+  <text x="256" y="330" font-family="serif" font-size="190" font-weight="bold"
+        fill="#f8f1e2" text-anchor="middle" transform="rotate(-3 256 256)">시</text>
+</svg>

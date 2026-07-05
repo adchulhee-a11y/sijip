@@ -1,0 +1,18 @@
+{
+  "name": "할머니를 위한 시집",
+  "short_name": "시집",
+  "description": "말로 시를 짓는 앱",
+  "start_url": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f6efdd",
+  "theme_color": "#f6efdd",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
