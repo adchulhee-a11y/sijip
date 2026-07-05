@@ -286,52 +286,6 @@ function setupRecognition() {
   return rec;
 }
 
-/* ============================================================
-   목소리 녹음 (테스트 중) — STT와 동시에 원본 오디오 저장
-   ============================================================ */
-let voiceStream = null, voiceRecorder = null, voiceChunks = [], lastVoiceBlob = null;
-
-async function startVoiceCapture() {
-  try {
-    if (!voiceStream || !voiceStream.active) {
-      voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    }
-    const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
-      : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '');
-    voiceChunks = [];
-    voiceRecorder = mime ? new MediaRecorder(voiceStream, { mimeType: mime }) : new MediaRecorder(voiceStream);
-    voiceRecorder.ondataavailable = (e) => { if (e.data && e.data.size) voiceChunks.push(e.data); };
-    voiceRecorder.onstop = () => {
-      lastVoiceBlob = new Blob(voiceChunks, { type: voiceRecorder.mimeType || 'audio/webm' });
-      showVoiceDebug();
-    };
-    voiceRecorder.start(1000);   // 1초 단위 조각 저장
-  } catch (e) {
-    showVoiceDebug('녹음 실패: ' + (e.name || e));
-  }
-}
-
-function stopVoiceCapture() {
-  try { if (voiceRecorder && voiceRecorder.state !== 'inactive') voiceRecorder.stop(); } catch { }
-}
-
-/* 테스트용 배너: 녹음 크기 표시, 누르면 마지막 녹음 재생 */
-function showVoiceDebug(msg) {
-  let el = document.getElementById('voice-debug');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'voice-debug';
-    el.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#1d5c2e;color:#fff;'
-      + 'font-size:15px;font-family:monospace;padding:6px 10px;z-index:98;text-align:center;';
-    el.onclick = () => {
-      if (lastVoiceBlob) new Audio(URL.createObjectURL(lastVoiceBlob)).play();
-    };
-    document.body.appendChild(el);
-  }
-  el.textContent = msg
-    || ('목소리 녹음 ' + Math.round((lastVoiceBlob ? lastVoiceBlob.size : 0) / 1024) + 'KB — 누르면 재생');
-}
-
 function startSpeaking() {
   if (recording) return;
   if (!recognition) recognition = setupRecognition();
@@ -339,7 +293,6 @@ function startSpeaking() {
     document.getElementById('rec-status').textContent = '이 폰에서는 음성 인식이 안 돼요';
     return;
   }
-  startVoiceCapture();   // 목소리 원본도 같이 녹음 (실패해도 받아쓰기는 계속)
   // 직전 종료의 확정 대기가 남아 있으면 지금 확정하고 새로 시작 (중복 방지)
   if (awaitingFinal) {
     try { recognition.abort(); } catch { }
@@ -384,7 +337,6 @@ function stopRecognition() {
   interimText = '';
   settleLineIndex = currentLine;
   awaitingFinal = true;
-  stopVoiceCapture();
   try { recognition.stop(); } catch { }
   stopSettleTimer = setTimeout(() => settleStop(true), 1200);
   updateRecUI();
