@@ -14,6 +14,21 @@ const EMAIL_CONFIG = {
 const MAX_POEMS = 3;          // 시집 최대 3개
 const STORAGE_KEY = 'poems';
 
+/* ----- 임시 디버그: 오류가 나면 화면 하단에 표시 (원인 파악용) ----- */
+function showFatal(msg) {
+  let el = document.getElementById('err-banner');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'err-banner';
+    el.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#8b0000;color:#fff;'
+      + 'font-size:15px;font-family:monospace;padding:8px 10px;z-index:99;white-space:pre-wrap;';
+    document.body.appendChild(el);
+  }
+  el.textContent = '오류: ' + msg;
+}
+window.addEventListener('error', (e) => showFatal(e.message + ' @' + (e.filename || '').split('/').pop() + ':' + e.lineno));
+window.addEventListener('unhandledrejection', (e) => showFatal(String(e.reason)));
+
 /* ----- 상태 ----- */
 let poems = [];               // [{id, lines[], updatedAt}]
 let currentPoem = null;       // 지금 편집/보기 중인 시
@@ -55,13 +70,34 @@ function showScreen(id) {
    TTS — 한국어 낭독 (속도 살짝 느리게)
    ============================================================ */
 function speak(text, onEnd, rate = 0.9) {
-  speechSynthesis.cancel();
-  if (!text) { if (onEnd) onEnd(); return; }
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = 'ko-KR';
-  u.rate = rate;
-  if (onEnd) u.onend = onEnd;
-  speechSynthesis.speak(u);
+  try {
+    if (!text) { if (onEnd) onEnd(); return; }
+    const doSpeak = () => {
+      try {
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = 'ko-KR';
+        u.rate = rate;
+        // 한국어 음성이 있으면 명시적으로 지정 (기기별 기본값 문제 회피)
+        const ko = speechSynthesis.getVoices().find(v => v.lang && v.lang.replace('_', '-').startsWith('ko'));
+        if (ko) u.voice = ko;
+        if (onEnd) u.onend = onEnd;
+        speechSynthesis.speak(u);
+      } catch (e) { if (onEnd) onEnd(); }
+    };
+    if (speechSynthesis.speaking || speechSynthesis.pending) {
+      speechSynthesis.cancel();
+      // 안드로이드 크롬: cancel 직후 speak는 무시됨 → 잠깐 뒤에 실행
+      setTimeout(doSpeak, 80);
+    } else {
+      doSpeak();
+    }
+  } catch (e) { if (onEnd) onEnd(); }
+}
+
+// 안드로이드: 음성 목록이 비동기 로딩됨 — 미리 불러두기
+if ('speechSynthesis' in window) {
+  speechSynthesis.getVoices();
+  speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
 }
 
 /* ============================================================
@@ -376,9 +412,12 @@ document.getElementById('btn-to-list').onclick = () => {
 
 /* ----- 전체 낭독 (다시 누르면 멈춤) ----- */
 function stopReading() {
-  readingAll = false;
-  speechSynthesis.cancel();
-  document.getElementById('btn-read').textContent = '전체 낭독';
+  // 어떤 경우에도 호출한 쪽(버튼 동작)을 막으면 안 됨
+  try {
+    readingAll = false;
+    speechSynthesis.cancel();
+    document.getElementById('btn-read').textContent = '전체 낭독';
+  } catch (e) { }
 }
 
 document.getElementById('btn-read').onclick = () => {
@@ -392,18 +431,28 @@ document.getElementById('btn-read').onclick = () => {
   currentPoem.lines.slice(2).forEach(l => { if (l.trim()) parts.push(l.trim()); });
   if (parts.length === 0) { speak('아직 쓴 내용이 없어요.'); return; }
 
-  speechSynthesis.cancel();
   readingAll = true;
   const btn = document.getElementById('btn-read');
   btn.textContent = '낭독 멈추기';
-  // 행마다 따로 읽어서 시 낭독처럼 사이가 살짝 벌어지게
-  parts.forEach((p, i) => {
-    const u = new SpeechSynthesisUtterance(p);
-    u.lang = 'ko-KR';
-    u.rate = 0.85;
-    if (i === parts.length - 1) u.onend = stopReading;
-    speechSynthesis.speak(u);
-  });
+  const koVoice = speechSynthesis.getVoices().find(v => v.lang && v.lang.replace('_', '-').startsWith('ko'));
+  const startReading = () => {
+    if (!readingAll) return;   // 그 사이 멈췄으면 취소
+    // 행마다 따로 읽어서 시 낭독처럼 사이가 살짝 벌어지게
+    parts.forEach((p, i) => {
+      const u = new SpeechSynthesisUtterance(p);
+      u.lang = 'ko-KR';
+      u.rate = 0.85;
+      if (koVoice) u.voice = koVoice;
+      if (i === parts.length - 1) u.onend = stopReading;
+      speechSynthesis.speak(u);
+    });
+  };
+  if (speechSynthesis.speaking || speechSynthesis.pending) {
+    speechSynthesis.cancel();
+    setTimeout(startReading, 80);  // 안드로이드: cancel 직후 speak 무시 버그 회피
+  } else {
+    startReading();
+  }
 };
 
 /* ----- 시 삭제 확인 창 (목록의 삭제 버튼에서 열림) ----- */

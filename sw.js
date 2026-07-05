@@ -1,6 +1,7 @@
 /* 오프라인에서도 열리게 하는 최소 서비스 워커 */
-const CACHE = 'sijip-v1';
-const FILES = ['.', 'index.html', 'style.css', 'app.js', 'manifest.json', 'icon.svg'];
+const CACHE = 'sijip-v2';
+const FILES = ['.', 'index.html', 'style.css', 'app.js', 'manifest.json',
+               'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)));
