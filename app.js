@@ -39,6 +39,11 @@ let recognition = null;
 let recStartTime = 0;         // 녹음 시작 시각 (안내음 에코 필터용)
 let pendingDeleteId = null;   // 목록에서 삭제 확인 중인 시
 let readingAll = false;       // 전체 낭독 중인가
+let pendingInterim = '';      // 종료 시점의 중간 결과 (최종 결과 못 받으면 이걸 사용)
+let awaitingFinal = false;    // 종료 후 최종 결과 대기 중인가
+let settleLineIndex = 0;      // 종료 시점의 현재 줄 (그 사이 줄 이동해도 원래 줄에 기록)
+let stopSettleTimer = null;
+let onStopSettled = null;     // 종료 확정 후 실행할 작업 (예: 줄 읽어주기)
 
 /* ============================================================
    저장 (모든 변경 즉시 localStorage — 저장 버튼 없음)
@@ -209,6 +214,9 @@ function moveLine(delta) {
 /* ----- 지우기 ----- */
 function eraseLine() {
   stopRecognition();
+  // 지우기는 인식 중이던 말도 함께 버림 (지운 줄에 다시 적히면 안 됨)
+  try { if (recognition) recognition.abort(); } catch { }
+  settleStop(false);
   currentPoem.lines[currentLine] = '';
   interimText = '';
   touchAndSave();
@@ -230,7 +238,10 @@ function setupRecognition() {
   rec.interimResults = true;
 
   rec.onresult = (e) => {
+    // 종료 처리까지 끝난 뒤 도착하는 늦은 결과는 무시 (중복 방지)
+    if (!recording && !awaitingFinal) return;
     interimText = '';
+    let gotFinal = false;
     for (let i = e.resultIndex; i < e.results.length; i++) {
       let t = e.results[i][0].transcript.trim();
       // 음성 인식이 자동으로 찍는 문장부호(. , ? 등)는 시에 불필요 → 제거 (전각 포함)
@@ -241,13 +252,17 @@ function setupRecognition() {
       }
       if (!t) continue;
       if (e.results[i].isFinal) {
-        // 확정된 말은 현재 줄에 이어 붙이고 즉시 저장
-        const cur = currentPoem.lines[currentLine] || '';
-        currentPoem.lines[currentLine] = cur ? cur + ' ' + t : t;
-        touchAndSave();
-      } else {
+        // 확정된 말은 줄에 이어 붙이고 즉시 저장
+        // (종료 후 도착한 최종 결과는 종료 시점의 줄에 기록)
+        appendToLine(recording ? currentLine : settleLineIndex, t);
+        gotFinal = true;
+      } else if (recording) {
         interimText += t;
       }
+    }
+    if (!recording && gotFinal) {
+      // 종료 후 최종 결과 도착 — 따로 담아둔 중간 결과는 버림 (같은 내용이므로)
+      settleStop(false);
     }
     renderEditor();
   };
@@ -278,6 +293,11 @@ function startSpeaking() {
     document.getElementById('rec-status').textContent = '이 폰에서는 음성 인식이 안 돼요';
     return;
   }
+  // 직전 종료의 확정 대기가 남아 있으면 지금 확정하고 새로 시작 (중복 방지)
+  if (awaitingFinal) {
+    try { recognition.abort(); } catch { }
+    settleStop(true);
+  }
   // 녹음을 즉시 시작하고 안내음은 동시에 재생 (마이크 준비 시간을 안내음이 채움)
   // 안내음이 마이크에 잡혀도 onresult의 에코 필터가 걸러냄
   recording = true;
@@ -288,26 +308,49 @@ function startSpeaking() {
   speak('말씀하세요', null, 1.1);
 }
 
+function appendToLine(idx, t) {
+  while (currentPoem.lines.length <= idx) currentPoem.lines.push('');
+  const cur = currentPoem.lines[idx] || '';
+  currentPoem.lines[idx] = cur ? cur + ' ' + t : t;
+  touchAndSave();
+}
+
+/* 종료 확정: 최종 결과를 받았거나(usePending=false)
+   기다려도 안 와서 중간 결과로 확정할 때(usePending=true) */
+function settleStop(usePending) {
+  if (stopSettleTimer) { clearTimeout(stopSettleTimer); stopSettleTimer = null; }
+  awaitingFinal = false;
+  if (usePending && pendingInterim) appendToLine(settleLineIndex, pendingInterim);
+  pendingInterim = '';
+  renderEditor();
+  // 미리보기 화면을 보고 있으면 늦게 확정된 마지막 말도 반영
+  if (document.getElementById('screen-preview').classList.contains('active')) renderPreview();
+  if (onStopSettled) { const cb = onStopSettled; onStopSettled = null; cb(); }
+}
+
 function stopRecognition() {
   if (!recording) return;
   recording = false;
+  // 중간 결과는 바로 붙이지 않고 담아만 둠 — 잠시 뒤 도착하는
+  // 최종 결과(더 정확)가 오면 그걸 쓰고, 안 오면 이걸로 확정 (중복 방지)
+  pendingInterim = interimText;
+  interimText = '';
+  settleLineIndex = currentLine;
+  awaitingFinal = true;
   try { recognition.stop(); } catch { }
-  // 인식 중이던 중간 결과도 확정해서 붙임
-  if (interimText) {
-    const cur = currentPoem.lines[currentLine] || '';
-    currentPoem.lines[currentLine] = cur ? cur + ' ' + interimText : interimText;
-    interimText = '';
-    touchAndSave();
-  }
+  stopSettleTimer = setTimeout(() => settleStop(true), 1200);
   updateRecUI();
   renderEditor();
 }
 
 function stopSpeaking() {
+  if (!recording) return;
+  // 종료가 확정된 뒤에(마지막 말까지 줄에 들어간 뒤에) 읽어 주기
+  onStopSettled = () => {
+    const line = currentPoem.lines[settleLineIndex];
+    if (line) speak(line);
+  };
   stopRecognition();
-  // 들은 내용을 읽어 주며 확인 (듣기 중심 설계)
-  const line = currentPoem.lines[currentLine];
-  if (line) speak(line);
 }
 
 function updateRecUI() {
