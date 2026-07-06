@@ -286,52 +286,6 @@ function setupRecognition() {
   return rec;
 }
 
-/* ============================================================
-   목소리 녹음 (테스트 중) — STT와 동시에 원본 오디오 저장
-   ============================================================ */
-let voiceStream = null, voiceRecorder = null, voiceChunks = [], lastVoiceBlob = null;
-
-async function startVoiceCapture() {
-  try {
-    if (!voiceStream || !voiceStream.active) {
-      voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    }
-    const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
-      : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '');
-    voiceChunks = [];
-    voiceRecorder = mime ? new MediaRecorder(voiceStream, { mimeType: mime }) : new MediaRecorder(voiceStream);
-    voiceRecorder.ondataavailable = (e) => { if (e.data && e.data.size) voiceChunks.push(e.data); };
-    voiceRecorder.onstop = () => {
-      lastVoiceBlob = new Blob(voiceChunks, { type: voiceRecorder.mimeType || 'audio/webm' });
-      showVoiceDebug();
-    };
-    voiceRecorder.start(1000);   // 1초 단위 조각 저장
-  } catch (e) {
-    showVoiceDebug('녹음 실패: ' + (e.name || e));
-  }
-}
-
-function stopVoiceCapture() {
-  try { if (voiceRecorder && voiceRecorder.state !== 'inactive') voiceRecorder.stop(); } catch { }
-}
-
-/* 테스트용 배너: 녹음 크기 표시, 누르면 마지막 녹음 재생 */
-function showVoiceDebug(msg) {
-  let el = document.getElementById('voice-debug');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'voice-debug';
-    el.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#1d5c2e;color:#fff;'
-      + 'font-size:15px;font-family:monospace;padding:6px 10px;z-index:98;text-align:center;';
-    el.onclick = () => {
-      if (lastVoiceBlob) new Audio(URL.createObjectURL(lastVoiceBlob)).play();
-    };
-    document.body.appendChild(el);
-  }
-  el.textContent = msg
-    || ('목소리 녹음 ' + Math.round((lastVoiceBlob ? lastVoiceBlob.size : 0) / 1024) + 'KB — 누르면 재생');
-}
-
 function startSpeaking() {
   if (recording) return;
   if (!recognition) recognition = setupRecognition();
@@ -339,7 +293,6 @@ function startSpeaking() {
     document.getElementById('rec-status').textContent = '이 폰에서는 음성 인식이 안 돼요';
     return;
   }
-  startVoiceCapture();   // 목소리 원본도 같이 녹음 (실패해도 받아쓰기는 계속)
   // 직전 종료의 확정 대기가 남아 있으면 지금 확정하고 새로 시작 (중복 방지)
   if (awaitingFinal) {
     try { recognition.abort(); } catch { }
@@ -384,7 +337,6 @@ function stopRecognition() {
   interimText = '';
   settleLineIndex = currentLine;
   awaitingFinal = true;
-  stopVoiceCapture();
   try { recognition.stop(); } catch { }
   stopSettleTimer = setTimeout(() => settleStop(true), 1200);
   updateRecUI();
@@ -430,8 +382,7 @@ function renderPreview() {
   });
 }
 
-async function sendMail() {
-  const btn = document.getElementById('btn-done');
+async function sendMail(voicePath, btn, btnHtml) {
   const title = (currentPoem.lines[0] || '').trim() || '(제목 없음)';
   const name = (currentPoem.lines[1] || '').trim();
   const content = currentPoem.lines.slice(2).filter(l => l.trim()).join('\n');
@@ -442,28 +393,159 @@ async function sendMail() {
       + '?subject=' + encodeURIComponent('[시집] ' + title)
       + '&body=' + encodeURIComponent(title + '\n' + name + '\n\n' + content);
     showScreen('screen-list'); renderList();
-    return;
+    return true;
   }
 
-  btn.disabled = true;
-  btn.innerHTML = '보내는 중...';
+  if (btn) { btn.disabled = true; btn.innerHTML = '보내는 중...'; }
   try {
     await emailjs.send(EMAIL_CONFIG.serviceId, EMAIL_CONFIG.templateId, {
       to_email: EMAIL_CONFIG.toEmail,
       poem_title: title,
       poem_name: name,
       poem_content: content,
+      poem_voice: voicePath || '(녹음 없음)',
     });
     speak('시를 보냈어요.');
     showScreen('screen-list');
     renderList();
+    return true;
   } catch (err) {
     speak('보내기에 실패했어요. 다시 눌러 주세요.');
+    return false;
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = '완료<br><small>(메일 보내기)</small>';
+    if (btn) { btn.disabled = false; btn.innerHTML = btnHtml || ''; }
   }
 }
+
+/* ============================================================
+   ⑤ 낭송 녹음 — 완성된 시를 소리 내어 읽으면 원본 오디오 저장
+   (받아쓰기와 시간을 분리: 안드로이드는 마이크 동시 사용 불가)
+   ============================================================ */
+const SUPA = {
+  url: 'YOUR_SUPABASE_URL',        // 예: https://xxxx.supabase.co
+  anonKey: 'YOUR_SUPABASE_ANON_KEY',
+  bucket: 'voices',
+};
+
+let reciteStream = null, reciteRecorder = null, reciteChunks = [];
+let reciting = false;
+let pendingVoicePath = null;      // 업로드 성공 후 메일만 실패했을 때 재전송용
+
+function renderRecite() {
+  pendingVoicePath = null;
+  document.getElementById('recite-title').textContent = (currentPoem.lines[0] || '').trim() || '(제목 없음)';
+  document.getElementById('recite-name').textContent = (currentPoem.lines[1] || '').trim();
+  const bodyEl = document.getElementById('recite-body');
+  bodyEl.innerHTML = '';
+  currentPoem.lines.slice(2).filter(l => l.trim()).forEach(line => {
+    const p = document.createElement('p');
+    p.textContent = line;
+    bodyEl.appendChild(p);
+  });
+  updateReciteUI();
+}
+
+function updateReciteUI() {
+  const start = document.getElementById('btn-recite-start');
+  start.disabled = reciting;
+  start.classList.toggle('recording', reciting);
+  document.getElementById('btn-recite-stop').disabled = !reciting;
+  document.getElementById('recite-status').textContent = reciting ? '● 녹음하고 있어요...' : '';
+}
+
+async function startRecite() {
+  if (reciting) return;
+  // 받아쓰기(음성 인식)가 마이크를 잡고 있으면 확실히 끔 (안드로이드 충돌 방지)
+  try { if (recognition) recognition.abort(); } catch { }
+  recording = false;
+  try {
+    reciteStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    document.getElementById('recite-status').textContent = '마이크를 사용할 수 없어요';
+    return;
+  }
+  const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
+    : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '');
+  reciteChunks = [];
+  reciteRecorder = mime ? new MediaRecorder(reciteStream, { mimeType: mime }) : new MediaRecorder(reciteStream);
+  reciteRecorder.ondataavailable = (e) => { if (e.data && e.data.size) reciteChunks.push(e.data); };
+  reciting = true;
+  updateReciteUI();
+  reciteRecorder.start(1000);   // 1초 단위 조각 저장
+}
+
+function stopReciteRecorder() {
+  return new Promise((resolve) => {
+    if (!reciteRecorder || reciteRecorder.state === 'inactive') { resolve(null); return; }
+    reciteRecorder.onstop = () => {
+      const blob = new Blob(reciteChunks, { type: reciteRecorder.mimeType || 'audio/webm' });
+      try { reciteStream.getTracks().forEach(t => t.stop()); } catch { }
+      resolve(blob);
+    };
+    try { reciteRecorder.stop(); } catch { resolve(null); }
+  });
+}
+
+async function uploadVoice(blob) {
+  if (SUPA.url === 'YOUR_SUPABASE_URL') return '(저장소 미설정)';
+  const title = ((currentPoem.lines[0] || '').trim() || '제목없음').replace(/[^0-9A-Za-z가-힣]/g, '');
+  const ext = (blob.type || '').includes('mp4') ? 'm4a' : 'webm';
+  const name = `${new Date().toISOString().slice(0, 10)}_${title}_${Date.now()}.${ext}`;
+  for (let attempt = 0; attempt < 2; attempt++) {   // 한 번 재시도
+    try {
+      const res = await fetch(`${SUPA.url}/storage/v1/object/${SUPA.bucket}/${name}`, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer ' + SUPA.anonKey,
+          apikey: SUPA.anonKey,
+          'Content-Type': blob.type || 'audio/webm',
+        },
+        body: blob,
+      });
+      if (res.ok) return `${SUPA.bucket}/${name}`;
+    } catch (e) { }
+  }
+  return '(녹음 업로드 실패)';
+}
+
+document.getElementById('btn-recite-start').onclick = startRecite;
+
+document.getElementById('btn-recite-stop').onclick = async () => {
+  const btn = document.getElementById('btn-recite-stop');
+  const status = document.getElementById('recite-status');
+  let voicePath;
+  if (reciting) {
+    reciting = false;
+    document.getElementById('btn-recite-start').classList.remove('recording');
+    btn.disabled = true;
+    status.textContent = '보내는 중...';
+    const blob = await stopReciteRecorder();
+    voicePath = (blob && blob.size > 0) ? await uploadVoice(blob) : '(녹음 없음)';
+  } else if (pendingVoicePath) {
+    voicePath = pendingVoicePath;   // 메일만 실패했던 경우 재전송
+  } else {
+    return;
+  }
+  const ok = await sendMail(voicePath, btn, '녹음 끝<br><small>(보내기)</small>');
+  if (ok) {
+    pendingVoicePath = null;
+    status.textContent = '';
+  } else {
+    pendingVoicePath = voicePath;   // 녹음은 살아있음 — 같은 버튼으로 재시도
+    btn.disabled = false;
+    status.textContent = '전송 실패 — [녹음 끝]을 다시 눌러 주세요';
+  }
+};
+
+document.getElementById('btn-recite-skip').onclick = async () => {
+  if (reciting) {   // 녹음 중이었으면 중단하고 녹음 없이 보냄
+    reciting = false;
+    await stopReciteRecorder();
+    updateReciteUI();
+  }
+  const btn = document.getElementById('btn-recite-skip');
+  await sendMail('(녹음 없음)', btn, '녹음 없이 보내기');
+};
 
 /* ============================================================
    이벤트 연결
@@ -492,7 +574,9 @@ document.getElementById('btn-back').onclick = () => {
 };
 document.getElementById('btn-done').onclick = () => {
   stopReading();
-  sendMail();
+  renderRecite();
+  showScreen('screen-recite');
+  speak('녹음 시작을 누르고, 시를 소리 내어 읽어 주세요.');
 };
 
 document.getElementById('btn-to-list').onclick = () => {
