@@ -1,5 +1,5 @@
 /* 오프라인에서도 열리게 하는 최소 서비스 워커 */
-const CACHE = 'sijip-v2';
+const CACHE = 'sijip-v3';   // 낭독 녹음 병합
 const FILES = ['.', 'index.html', 'style.css', 'app.js', 'manifest.json',
                'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
 
