@@ -465,9 +465,10 @@ function stopReciteRecorder() {
 
 async function uploadVoice(blob) {
   if (SUPA.url === 'YOUR_SUPABASE_URL') return '(저장소 미설정)';
-  const title = ((currentPoem.lines[0] || '').trim() || '제목없음').replace(/[^0-9A-Za-z가-힣]/g, '');
   const ext = (blob.type || '').includes('mp4') ? 'm4a' : 'webm';
-  const name = `${new Date().toISOString().slice(0, 10)}_${title}_${Date.now()}.${ext}`;
+  // 저장소가 한글 파일명을 거부(InvalidKey)하므로 영문+숫자만 사용
+  // 시 제목은 메일 본문에 있으니 PC에서 받을 때 제목으로 바꿔 저장함
+  const name = `${new Date().toISOString().slice(0, 10)}_poem_${Date.now()}.${ext}`;
   for (let attempt = 0; attempt < 2; attempt++) {   // 한 번 재시도
     try {
       const res = await fetch(`${SUPA.url}/storage/v1/object/${SUPA.bucket}/${name}`, {
