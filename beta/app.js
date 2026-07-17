@@ -512,7 +512,7 @@ document.getElementById('btn-read').onclick = async () => {
     reciting = false;
     const blob = await stopReciteRecorder();
     if (blob && blob.size > 0) reciteBlob = blob;
-    updateReciteUI(reciteBlob ? '녹음됐어요 — [완료]를 누르면 함께 보내요' : '');
+    updateReciteUI(reciteBlob ? '녹음됐어요' : '');
   }
 };
 
