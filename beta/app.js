@@ -422,8 +422,8 @@ async function sendMail(voicePath, btn, btnHtml) {
    (받아쓰기와 시간을 분리: 안드로이드는 마이크 동시 사용 불가)
    ============================================================ */
 const SUPA = {
-  url: 'YOUR_SUPABASE_URL',        // 예: https://xxxx.supabase.co
-  anonKey: 'YOUR_SUPABASE_ANON_KEY',
+  url: 'https://xyppnfnkkfvkawuhhopu.supabase.co',
+  anonKey: 'sb_publishable_ogQFoTpV00zX3V5xSDRESQ_2Pw4QZHC',  // 업로드 전용 공개 키
   bucket: 'voices',
 };
 
