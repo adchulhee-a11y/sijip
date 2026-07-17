@@ -367,19 +367,12 @@ body {
   box-shadow: inset 0 0 0 2px rgba(255, 245, 230, 0.35);
 }
 
-/* ===== ⑤ 낭송 녹음 ===== */
-#btn-recite-start.recording,
-#btn-recite-start.recording:disabled {
+/* ===== ⑤ 낭독 녹음 (미리보기의 [낭독 하기] 버튼) ===== */
+#btn-read.recording {
   background: var(--seal);
   border-color: var(--seal-dark);
   color: #ffffff;
-  opacity: 1;
   box-shadow: inset 0 0 0 2px rgba(255, 245, 230, 0.35);
-}
-.btn-skip {
-  margin-top: 12px;
-  min-height: 78px;
-  font-size: 28px;
 }
 
 /* ===== 확인 창 (시 삭제) ===== */
