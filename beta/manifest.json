@@ -1,6 +1,6 @@
 {
-  "name": "할머니를 위한 시집 (녹음판)",
-  "short_name": "시집녹음",
+  "name": "할머니를 위한 시집",
+  "short_name": "시집",
   "description": "말로 시를 짓는 앱",
   "start_url": ".",
   "display": "standalone",
