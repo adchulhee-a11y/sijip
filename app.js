@@ -290,7 +290,11 @@ function startSpeaking() {
   if (recording) return;
   if (!recognition) recognition = setupRecognition();
   if (!recognition) {
-    document.getElementById('rec-status').textContent = '이 폰에서는 음성 인식이 안 돼요';
+    // 아이패드/아이폰의 크롬은 음성 인식이 안 됨 → 사파리 안내
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+      || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    document.getElementById('rec-status').textContent =
+      isIOS ? 'Safari(사파리)로 열어 주세요' : '이 폰에서는 음성 인식이 안 돼요';
     return;
   }
   // 직전 종료의 확정 대기가 남아 있으면 지금 확정하고 새로 시작 (중복 방지)
